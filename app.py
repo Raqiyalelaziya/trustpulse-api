@@ -192,6 +192,105 @@ def get_shop(shop_id):
     db.close()
     return jsonify(shop)
  
+ 
+@app.route("/shops/<shop_id>", methods=["PATCH"])
+def update_shop(shop_id):
+    payload = decode_token(request)
+    if not payload:
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.json or {}
+    allowed = ["name", "description", "category", "platform", "profile_url", "flagged"]
+    updates = {k: v for k, v in data.items() if k in allowed}
+    if not updates:
+        return jsonify({"error": "Nothing to update"}), 400
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    set_clause = ", ".join(f"{k} = %s" for k in updates)
+    cursor.execute(f"UPDATE shops SET {set_clause} WHERE id = %s", (*updates.values(), shop_id))
+    db.commit()
+    cursor.execute("SELECT * FROM shops WHERE id = %s", (shop_id,))
+    shop = cursor.fetchone()
+    cursor.close()
+    db.close()
+    if shop:
+        shop["trust_score"] = float(shop["trust_score"] or 0)
+    return jsonify(shop or {})
+ 
+@app.route("/auth/me", methods=["PATCH"])
+def update_me():
+    payload = decode_token(request)
+    if not payload:
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.json or {}
+    allowed = ["full_name", "display_name", "username", "profile_completeness", "profile_image", "owned_shop_id"]
+    updates = {k: v for k, v in data.items() if k in allowed}
+    if not updates:
+        return jsonify({"error": "Nothing to update"}), 400
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    set_clause = ", ".join(f"{k} = %s" for k in updates)
+    cursor.execute(f"UPDATE users SET {set_clause} WHERE id = %s", (*updates.values(), payload["user_id"]))
+    db.commit()
+    cursor.execute(
+        "SELECT id, email, full_name, role, trust_score, profile_completeness, account_created_at FROM users WHERE id = %s",
+        (payload["user_id"],)
+    )
+    user = cursor.fetchone()
+    cursor.execute("SELECT points_balance FROM reward_points WHERE user_id = %s", (payload["user_id"],))
+    pts = cursor.fetchone()
+    cursor.close()
+    db.close()
+    if user:
+        user["points_balance"] = pts["points_balance"] if pts else 0
+        user["trust_score"] = float(user["trust_score"] or 0)
+    return jsonify(user or {})
+ 
+@app.route("/reviews/<int:review_id>", methods=["PATCH"])
+def update_review(review_id):
+    payload = decode_token(request)
+    if not payload:
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.json or {}
+    allowed = ["likes", "reported", "comments_count"]
+    updates = {k: v for k, v in data.items() if k in allowed}
+    if not updates:
+        return jsonify({"error": "Nothing to update"}), 400
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    set_clause = ", ".join(f"{k} = %s" for k in updates)
+    cursor.execute(f"UPDATE reviews SET {set_clause} WHERE id = %s", (*updates.values(), review_id))
+    db.commit()
+    cursor.close()
+    db.close()
+    return jsonify({"success": True})
+ 
+@app.route("/reviews/<int:review_id>", methods=["DELETE"])
+def delete_review(review_id):
+    payload = decode_token(request)
+    if not payload:
+        return jsonify({"error": "Unauthorized"}), 401
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("DELETE FROM reviews WHERE id = %s", (review_id,))
+    db.commit()
+    cursor.close()
+    db.close()
+    return jsonify({"success": True})
+ 
+@app.route("/shops/<shop_id>", methods=["DELETE"])
+def delete_shop(shop_id):
+    payload = decode_token(request)
+    if not payload:
+        return jsonify({"error": "Unauthorized"}), 401
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("DELETE FROM reviews WHERE shop_id = %s", (shop_id,))
+    cursor.execute("DELETE FROM shops WHERE id = %s", (shop_id,))
+    db.commit()
+    cursor.close()
+    db.close()
+    return jsonify({"success": True})
+ 
 @app.route("/reviews", methods=["GET"])
 def get_reviews():
     shop_id = request.args.get("shop_id")
