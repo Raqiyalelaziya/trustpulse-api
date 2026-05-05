@@ -517,6 +517,40 @@ def leaderboard():
     db.close()
     return jsonify(users)
  
+ 
+@app.route("/comments", methods=["POST"])
+def add_comment():
+    payload = decode_token(request)
+    if not payload:
+        return jsonify({"error": "Login required"}), 401
+    data = request.json
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    cursor.execute(
+        "INSERT INTO comments (review_id, user_id, commenter_name, commenter_email, comment_text) VALUES (%s, %s, %s, %s, %s)",
+        (data.get("review_id"), payload["user_id"], data.get("commenter_name"), data.get("commenter_email"), data.get("comment_text"))
+    )
+    db.commit()
+    cursor.close()
+    db.close()
+    return jsonify({"message": "Comment added"})
+ 
+@app.route("/comments", methods=["GET"])
+def get_comments():
+    review_id = request.args.get("review_id")
+    if not review_id:
+        return jsonify([])
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    cursor.execute(
+        "SELECT * FROM comments WHERE review_id = %s ORDER BY created_at ASC",
+        (review_id,)
+    )
+    comments = cursor.fetchall()
+    cursor.close()
+    db.close()
+    return jsonify(comments)
+ 
 @app.route("/", methods=["GET"])
 def health():
     return jsonify({"status": "TrustPulse API running"})
