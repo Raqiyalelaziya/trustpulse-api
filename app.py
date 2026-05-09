@@ -106,7 +106,7 @@ def me():
     db = get_db()
     cursor = db.cursor(dictionary=True)
     cursor.execute(
-        "SELECT id, email, full_name, role, trust_score, profile_completeness, account_created_at FROM users WHERE id = %s",
+        "SELECT id, email, full_name, role, trust_score, profile_completeness, account_created_at, account_type FROM users WHERE id = %s",
         (payload["user_id"],)
     )
     user = cursor.fetchone()
@@ -122,6 +122,27 @@ def me():
     user["points_balance"] = pts["points_balance"] if pts else 0
     user["trust_score"] = float(user["trust_score"] or 0)
     return jsonify(user)
+ 
+@app.route("/auth/update-account-type", methods=["POST"])
+def update_account_type():
+    payload = decode_token(request)
+    if not payload:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    data = request.json
+    account_type = data.get("account_type")
+    
+    if account_type not in ['user', 'shop_owner']:
+        return jsonify({"error": "Invalid account type"}), 400
+    
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    cursor.execute("UPDATE users SET account_type = %s WHERE id = %s", (account_type, payload["user_id"]))
+    db.commit()
+    cursor.close()
+    db.close()
+    
+    return jsonify({"success": True, "account_type": account_type})
  
 @app.route("/shops", methods=["GET"])
 def get_shops():
