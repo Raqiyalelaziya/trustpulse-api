@@ -7,7 +7,15 @@ import datetime
 import os
  
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": ["https://trustpulse-web.vercel.app", "http://localhost:5173"]}})
+CORS(app, resources={
+    r"/*": {
+        "origins": ["https://trustpulse-web.vercel.app", "http://localhost:5173"],
+        "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "expose_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": False
+    }
+})
  
 SECRET_KEY = os.environ.get("SECRET_KEY", "trustpulse-secret-2024")
  
