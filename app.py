@@ -588,8 +588,9 @@ def leaderboard():
         FROM users u
         LEFT JOIN reward_points rp ON rp.user_id = u.id
         LEFT JOIN reviews r ON r.user_id = u.id
+        WHERE u.role = 'user'
         GROUP BY u.id
-        ORDER BY rp.points_balance DESC
+        ORDER BY u.trust_score DESC, rp.points_balance DESC
         LIMIT 20
     """)
     users = cursor.fetchall()
