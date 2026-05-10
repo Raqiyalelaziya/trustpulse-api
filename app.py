@@ -7,22 +7,36 @@ import datetime
 import os
  
 app = Flask(__name__)
-CORS(app, resources={
-    r"/*": {
-        "origins": ["https://trustpulse-web.vercel.app", "http://localhost:5173"],
-        "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"],
-        "expose_headers": ["Content-Type", "Authorization"],
-        "supports_credentials": False
-    }
-})
 
-# Handle preflight OPTIONS requests
+# Enhanced CORS configuration
+CORS(app, 
+     resources={r"/*": {
+         "origins": ["*"],
+         "allow_headers": ["Content-Type", "Authorization", "Accept"],
+         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+         "supports_credentials": True,
+         "expose_headers": ["Content-Type", "Authorization"]
+     }})
+
+# Add before_request handler to set CORS headers explicitly
 @app.before_request
 def handle_preflight():
     if request.method == "OPTIONS":
         response = app.make_default_options_response()
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept'
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
         return response
+
+# Add after_request handler to ensure CORS headers are always present
+@app.after_request
+def after_request(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept'
+    response.headers['Access-Control-Allow-Credentials'] = 'true'
+    return response
  
 SECRET_KEY = os.environ.get("SECRET_KEY", "trustpulse-secret-2024")
  
@@ -80,11 +94,6 @@ def signup():
     finally:
         cursor.close()
         db.close()
-
-# Alias for backward compatibility
-@app.route("/signup", methods=["POST"])
-def signup_alias():
-    return signup()
  
 @app.route("/auth/login", methods=["POST"])
 def login():
@@ -126,7 +135,7 @@ def me():
     db = get_db()
     cursor = db.cursor(dictionary=True)
     cursor.execute(
-        "SELECT id, email, full_name, role, trust_score, profile_completeness, account_created_at, account_type FROM users WHERE id = %s",
+        "SELECT id, email, full_name, role, trust_score, profile_completeness, account_created_at, owned_shop_id FROM users WHERE id = %s",
         (payload["user_id"],)
     )
     user = cursor.fetchone()
@@ -142,27 +151,6 @@ def me():
     user["points_balance"] = pts["points_balance"] if pts else 0
     user["trust_score"] = float(user["trust_score"] or 0)
     return jsonify(user)
-
-@app.route("/auth/update-account-type", methods=["POST"])
-def update_account_type():
-    payload = decode_token(request)
-    if not payload:
-        return jsonify({"error": "Unauthorized"}), 401
-    
-    data = request.json
-    account_type = data.get("account_type")
-    
-    if account_type not in ['user', 'shop_owner']:
-        return jsonify({"error": "Invalid account type"}), 400
-    
-    db = get_db()
-    cursor = db.cursor(dictionary=True)
-    cursor.execute("UPDATE users SET account_type = %s WHERE id = %s", (account_type, payload["user_id"]))
-    db.commit()
-    cursor.close()
-    db.close()
-    
-    return jsonify({"success": True, "account_type": account_type})
  
 @app.route("/shops", methods=["GET"])
 def get_shops():
@@ -194,8 +182,77 @@ def get_shops():
     cursor.close()
     db.close()
     return jsonify(shops)
- 
-# ── Fixed: accepts both UUID strings and integer IDs ─────────────────────────
+
+@app.route("/shops", methods=["POST"])
+def create_shop():
+    payload = decode_token(request)
+    if not payload:
+        return jsonify({"error": "Login required"}), 401
+    
+    data = request.json
+    user_id = payload["user_id"]
+    
+    # Required fields
+    name = data.get("name", "").strip()
+    category = data.get("category", "")
+    platform = data.get("platform", "")
+    
+    if not name or not category or not platform:
+        return jsonify({"error": "name, category, and platform are required"}), 400
+    
+    # Optional fields
+    description = data.get("description", "").strip() or None
+    profile_url = data.get("profile_url", "").strip() or None
+    shop_icon = data.get("shop_icon", "").strip() or None
+    license_number = data.get("license_number", "").strip() or None
+    license_verified = 1 if license_number else 0
+    
+    # Initial trust score: 10% if verified, 0% otherwise
+    initial_trust_score = 10.0 if license_verified else 0.0
+    
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    
+    try:
+        # Create shop with owner_id set to current user
+        cursor.execute(
+            """INSERT INTO shops 
+               (owner_id, name, category, platform, description, profile_url, shop_icon, 
+                license_number, license_verified, trust_score, flagged, created_at) 
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, NOW())""",
+            (user_id, name, category, platform, description, profile_url, shop_icon,
+             license_number, license_verified, initial_trust_score)
+        )
+        db.commit()
+        shop_id = cursor.lastrowid
+        
+        # Automatically update user's owned_shop_id
+        cursor.execute(
+            "UPDATE users SET owned_shop_id = %s WHERE id = %s",
+            (shop_id, user_id)
+        )
+        db.commit()
+        
+        # Return the created shop
+        cursor.execute("SELECT * FROM shops WHERE id = %s", (shop_id,))
+        shop = cursor.fetchone()
+        
+        if shop:
+            shop["trust_score"] = float(shop["trust_score"] or 0)
+        
+        cursor.close()
+        db.close()
+        
+        return jsonify({
+            "message": "Shop created successfully",
+            "shop": shop
+        }), 201
+        
+    except Exception as e:
+        cursor.close()
+        db.close()
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/shops/<shop_id>", methods=["GET"])
 def get_shop(shop_id):
     db = get_db()
@@ -205,163 +262,88 @@ def get_shop(shop_id):
         (shop_id,)
     )
     shop = cursor.fetchone()
+    cursor.close()
+    db.close()
+    if not shop:
+        return jsonify({"error": "Shop not found"}), 404
+    shop["trust_score"] = float(shop["trust_score"] or 0)
+    return jsonify(shop)
+
+@app.route("/shops/<shop_id>", methods=["PUT"])
+def update_shop(shop_id):
+    payload = decode_token(request)
+    if not payload:
+        return jsonify({"error": "Login required"}), 401
+    
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    cursor.execute("SELECT owner_id FROM shops WHERE id = %s", (shop_id,))
+    shop = cursor.fetchone()
+    
     if not shop:
         cursor.close()
         db.close()
         return jsonify({"error": "Shop not found"}), 404
- 
+    
+    if shop["owner_id"] != payload["user_id"]:
+        cursor.close()
+        db.close()
+        return jsonify({"error": "You can only edit your own shop"}), 403
+    
+    data = request.json
+    updates = []
+    values = []
+    
+    for field in ["name", "category", "platform", "description", "profile_url", "shop_icon", "license_number"]:
+        if field in data:
+            updates.append(f"{field} = %s")
+            values.append(data[field])
+    
+    if "license_number" in data:
+        updates.append("license_verified = %s")
+        values.append(1 if data["license_number"] else 0)
+    
+    if not updates:
+        cursor.close()
+        db.close()
+        return jsonify({"error": "No fields to update"}), 400
+    
+    values.append(shop_id)
+    cursor.execute(f"UPDATE shops SET {', '.join(updates)} WHERE id = %s", values)
+    db.commit()
+    
+    cursor.execute("SELECT * FROM shops WHERE id = %s", (shop_id,))
+    updated_shop = cursor.fetchone()
+    cursor.close()
+    db.close()
+    
+    if updated_shop:
+        updated_shop["trust_score"] = float(updated_shop["trust_score"] or 0)
+    
+    return jsonify({"message": "Shop updated", "shop": updated_shop})
+
+@app.route("/reviews", methods=["GET"])
+def get_reviews():
+    shop_id = request.args.get("shop_id")
+    if not shop_id:
+        return jsonify([])
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
     cursor.execute(
-        """SELECT r.*, u.full_name as reviewer_name, u.trust_score as reviewer_trust
+        """SELECT r.*, u.full_name as reviewer_name, u.trust_score as reviewer_trust_score
            FROM reviews r
            LEFT JOIN users u ON r.user_id = u.id
            WHERE r.shop_id = %s AND r.is_approved = 1
            ORDER BY r.created_at DESC""",
         (shop_id,)
     )
-    shop["reviews"] = cursor.fetchall()
-    shop["trust_score"] = float(shop["trust_score"] or 0)
- 
-    # Add computed fields for frontend
-    reviews = shop["reviews"]
-    shop["review_count"] = len(reviews)
-    shop["average_rating"] = round(
-        sum(r["rating"] for r in reviews) / len(reviews), 1
-    ) if reviews else 0
-    shop["verified_review_count"] = sum(1 for r in reviews if r.get("is_verified"))
- 
-    cursor.close()
-    db.close()
-    return jsonify(shop)
- 
- 
-@app.route("/shops/<shop_id>", methods=["PATCH"])
-def update_shop(shop_id):
-    payload = decode_token(request)
-    if not payload:
-        return jsonify({"error": "Unauthorized"}), 401
-    data = request.json or {}
-    allowed = ["name", "description", "category", "platform", "profile_url", "flagged"]
-    updates = {k: v for k, v in data.items() if k in allowed}
-    if not updates:
-        return jsonify({"error": "Nothing to update"}), 400
-    db = get_db()
-    cursor = db.cursor(dictionary=True)
-    set_clause = ", ".join(f"{k} = %s" for k in updates)
-    cursor.execute(f"UPDATE shops SET {set_clause} WHERE id = %s", (*updates.values(), shop_id))
-    db.commit()
-    cursor.execute("SELECT * FROM shops WHERE id = %s", (shop_id,))
-    shop = cursor.fetchone()
-    cursor.close()
-    db.close()
-    if shop:
-        shop["trust_score"] = float(shop["trust_score"] or 0)
-    return jsonify(shop or {})
- 
-@app.route("/auth/me", methods=["PATCH"])
-def update_me():
-    payload = decode_token(request)
-    if not payload:
-        return jsonify({"error": "Unauthorized"}), 401
-    data = request.json or {}
-    allowed = ["full_name", "display_name", "username", "profile_completeness", "profile_image", "owned_shop_id"]
-    updates = {k: v for k, v in data.items() if k in allowed}
-    if not updates:
-        return jsonify({"error": "Nothing to update"}), 400
-    db = get_db()
-    cursor = db.cursor(dictionary=True)
-    set_clause = ", ".join(f"{k} = %s" for k in updates)
-    cursor.execute(f"UPDATE users SET {set_clause} WHERE id = %s", (*updates.values(), payload["user_id"]))
-    db.commit()
-    cursor.execute(
-        "SELECT id, email, full_name, role, trust_score, profile_completeness, account_created_at FROM users WHERE id = %s",
-        (payload["user_id"],)
-    )
-    user = cursor.fetchone()
-    cursor.execute("SELECT points_balance FROM reward_points WHERE user_id = %s", (payload["user_id"],))
-    pts = cursor.fetchone()
-    cursor.close()
-    db.close()
-    if user:
-        user["points_balance"] = pts["points_balance"] if pts else 0
-        user["trust_score"] = float(user["trust_score"] or 0)
-    return jsonify(user or {})
- 
-@app.route("/reviews/<int:review_id>", methods=["PATCH"])
-def update_review(review_id):
-    payload = decode_token(request)
-    if not payload:
-        return jsonify({"error": "Unauthorized"}), 401
-    data = request.json or {}
-    allowed = ["likes", "reported", "comments_count"]
-    updates = {k: v for k, v in data.items() if k in allowed}
-    if not updates:
-        return jsonify({"error": "Nothing to update"}), 400
-    db = get_db()
-    cursor = db.cursor(dictionary=True)
-    set_clause = ", ".join(f"{k} = %s" for k in updates)
-    cursor.execute(f"UPDATE reviews SET {set_clause} WHERE id = %s", (*updates.values(), review_id))
-    db.commit()
-    cursor.close()
-    db.close()
-    return jsonify({"success": True})
- 
-@app.route("/reviews/<int:review_id>", methods=["DELETE"])
-def delete_review(review_id):
-    payload = decode_token(request)
-    if not payload:
-        return jsonify({"error": "Unauthorized"}), 401
-    db = get_db()
-    cursor = db.cursor()
-    cursor.execute("DELETE FROM reviews WHERE id = %s", (review_id,))
-    db.commit()
-    cursor.close()
-    db.close()
-    return jsonify({"success": True})
- 
-@app.route("/shops/<shop_id>", methods=["DELETE"])
-def delete_shop(shop_id):
-    payload = decode_token(request)
-    if not payload:
-        return jsonify({"error": "Unauthorized"}), 401
-    db = get_db()
-    cursor = db.cursor()
-    cursor.execute("DELETE FROM reviews WHERE shop_id = %s", (shop_id,))
-    cursor.execute("DELETE FROM shops WHERE id = %s", (shop_id,))
-    db.commit()
-    cursor.close()
-    db.close()
-    return jsonify({"success": True})
- 
-@app.route("/reviews", methods=["GET"])
-def get_reviews():
-    shop_id = request.args.get("shop_id")
-    user_id = request.args.get("user_id")
- 
-    db = get_db()
-    cursor = db.cursor(dictionary=True)
- 
-    query = """
-        SELECT r.*, u.full_name as reviewer_name, s.name as shop_name
-        FROM reviews r
-        LEFT JOIN users u ON r.user_id = u.id
-        LEFT JOIN shops s ON r.shop_id = s.id
-        WHERE r.is_approved = 1
-    """
-    params = []
-    if shop_id:
-        query += " AND r.shop_id = %s"
-        params.append(shop_id)
-    if user_id:
-        query += " AND r.user_id = %s"
-        params.append(user_id)
- 
-    query += " ORDER BY r.created_at DESC LIMIT 100"
-    cursor.execute(query, params)
     reviews = cursor.fetchall()
+    for r in reviews:
+        r["reviewer_trust_score"] = float(r["reviewer_trust_score"] or 0)
     cursor.close()
     db.close()
     return jsonify(reviews)
- 
+
 @app.route("/reviews", methods=["POST"])
 def submit_review():
     payload = decode_token(request)
@@ -373,11 +355,9 @@ def submit_review():
     shop_id = data.get("shop_id")
     rating = data.get("rating")
     review_text = data.get("review_text", "")
-    evidence_url = data.get("evidence_url", "")
+    evidence_url = data.get("evidence_url")
  
-    if not shop_id or not rating:
-        return jsonify({"error": "shop_id and rating are required"}), 400
-    if not (1 <= int(rating) <= 5):
+    if not rating or rating < 1 or rating > 5:
         return jsonify({"error": "Rating must be 1-5"}), 400
  
     db = get_db()
