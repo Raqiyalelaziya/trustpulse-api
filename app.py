@@ -16,7 +16,7 @@ CORS(app, resources={
         "supports_credentials": False
     }
 })
- 
+
 # Handle preflight OPTIONS requests
 @app.before_request
 def handle_preflight():
@@ -80,6 +80,11 @@ def signup():
     finally:
         cursor.close()
         db.close()
+
+# Alias for backward compatibility
+@app.route("/signup", methods=["POST"])
+def signup_alias():
+    return signup()
  
 @app.route("/auth/login", methods=["POST"])
 def login():
@@ -137,7 +142,7 @@ def me():
     user["points_balance"] = pts["points_balance"] if pts else 0
     user["trust_score"] = float(user["trust_score"] or 0)
     return jsonify(user)
- 
+
 @app.route("/auth/update-account-type", methods=["POST"])
 def update_account_type():
     payload = decode_token(request)
