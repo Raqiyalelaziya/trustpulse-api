@@ -46,6 +46,7 @@ def decode_token(request):
         return None
  
 @app.route("/auth/signup", methods=["POST"])
+@app.route("/signup", methods=["POST"])  # Alias for frontend compatibility
 def signup():
     data = request.json
     email = data.get("email", "").strip().lower()
@@ -83,6 +84,7 @@ def signup():
         db.close()
  
 @app.route("/auth/login", methods=["POST"])
+@app.route("/login", methods=["POST"])  # Alias
 def login():
     data = request.json
     email = data.get("email", "").strip().lower()
