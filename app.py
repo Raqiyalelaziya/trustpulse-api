@@ -7,23 +7,7 @@ import datetime
 import os
  
 app = Flask(__name__)
-CORS(app)
-
-@app.before_request
-def handle_options():
-    if request.method == 'OPTIONS':
-        response = jsonify({'status': 'ok'})
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-        return response, 200
-
-@app.after_request
-def after_request(response):
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-    return response
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
  
 SECRET_KEY = os.environ.get("SECRET_KEY", "trustpulse-secret-2024")
  
@@ -46,7 +30,6 @@ def decode_token(request):
         return None
  
 @app.route("/auth/signup", methods=["POST"])
-@app.route("/signup", methods=["POST"])  # Alias for frontend compatibility
 def signup():
     data = request.json
     email = data.get("email", "").strip().lower()
@@ -67,14 +50,8 @@ def signup():
         )
         db.commit()
         user_id = cursor.lastrowid
-        
-        # Try to add reward points, but don't fail if it errors
-        try:
-            cursor.execute("INSERT INTO reward_points (user_id, points_balance) VALUES (%s, 0)", (user_id,))
-            db.commit()
-        except Exception as e:
-            # Log but don't fail signup
-            print(f"Reward points error: {e}")
+        cursor.execute("INSERT INTO reward_points (user_id, points_balance) VALUES (%s, 0)", (user_id,))
+        db.commit()
  
         token = jwt.encode({
             "user_id": user_id,
@@ -83,18 +60,13 @@ def signup():
         }, SECRET_KEY, algorithm="HS256")
  
         return jsonify({"token": token, "user_id": user_id, "email": email, "full_name": full_name})
-    except mysql.connector.errors.IntegrityError as e:
-        # Check if it's actually an email duplicate
-        if 'email' in str(e).lower() or 'unique' in str(e).lower():
-            return jsonify({"error": "Email already registered"}), 409
-        else:
-            return jsonify({"error": f"Database error: {str(e)}"}), 500
+    except mysql.connector.errors.IntegrityError:
+        return jsonify({"error": "Email already registered"}), 409
     finally:
         cursor.close()
         db.close()
  
 @app.route("/auth/login", methods=["POST"])
-@app.route("/login", methods=["POST"])  # Alias
 def login():
     data = request.json
     email = data.get("email", "").strip().lower()
@@ -287,7 +259,7 @@ def get_shop(shop_id):
     return jsonify(shop)
  
  
-@app.route("/shops/<shop_id>", methods=["PATCH"])
+@app.route("/shops/<shop_id>", methods=["PUT", "PATCH"])
 def update_shop(shop_id):
     payload = decode_token(request)
     if not payload:
@@ -308,7 +280,7 @@ def update_shop(shop_id):
     db.close()
     if shop:
         shop["trust_score"] = float(shop["trust_score"] or 0)
-    return jsonify(shop or {})
+    return jsonify({"shop": shop} if shop else {})
  
 @app.route("/auth/me", methods=["PATCH"])
 def update_me():
