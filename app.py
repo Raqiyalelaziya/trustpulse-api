@@ -41,7 +41,7 @@ def signup():
  
     hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
     db = get_db()
-    cursor = db.cursor(dictionary=True)
+    cursor = db.cursor(dictionary=True, buffered=True)
  
     try:
         cursor.execute(
@@ -73,7 +73,7 @@ def login():
     password = data.get("password", "")
  
     db = get_db()
-    cursor = db.cursor(dictionary=True)
+    cursor = db.cursor(dictionary=True, buffered=True)
     cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
     user = cursor.fetchone()
     cursor.close()
@@ -104,7 +104,7 @@ def me():
         return jsonify({"error": "Unauthorized"}), 401
  
     db = get_db()
-    cursor = db.cursor(dictionary=True)
+    cursor = db.cursor(dictionary=True, buffered=True)
     cursor.execute(
         "SELECT id, email, full_name, role, trust_score, profile_completeness, account_created_at FROM users WHERE id = %s",
         (payload["user_id"],)
@@ -129,7 +129,7 @@ def get_shops():
     search = request.args.get("search")
  
     db = get_db()
-    cursor = db.cursor(dictionary=True)
+    cursor = db.cursor(dictionary=True, buffered=True)
     query = """
         SELECT s.*, u.full_name as owner_name, COUNT(r.id) as review_count
         FROM shops s
@@ -182,7 +182,7 @@ def create_shop():
     initial_trust_score = 10.0 if license_verified else 0.0
     
     db = get_db()
-    cursor = db.cursor(dictionary=True)
+    cursor = db.cursor(dictionary=True, buffered=True)
     
     try:
         # Create shop with owner_id set to current user
@@ -224,7 +224,7 @@ def create_shop():
 @app.route("/shops/<shop_id>", methods=["GET"])
 def get_shop(shop_id):
     db = get_db()
-    cursor = db.cursor(dictionary=True)
+    cursor = db.cursor(dictionary=True, buffered=True)
     cursor.execute(
         "SELECT s.*, u.full_name as owner_name FROM shops s LEFT JOIN users u ON s.owner_id = u.id WHERE s.id = %s",
         (shop_id,)
@@ -270,7 +270,7 @@ def update_shop(shop_id):
     if not updates:
         return jsonify({"error": "Nothing to update"}), 400
     db = get_db()
-    cursor = db.cursor(dictionary=True)
+    cursor = db.cursor(dictionary=True, buffered=True)
     set_clause = ", ".join(f"{k} = %s" for k in updates)
     cursor.execute(f"UPDATE shops SET {set_clause} WHERE id = %s", (*updates.values(), shop_id))
     db.commit()
@@ -293,7 +293,7 @@ def update_me():
     if not updates:
         return jsonify({"error": "Nothing to update"}), 400
     db = get_db()
-    cursor = db.cursor(dictionary=True)
+    cursor = db.cursor(dictionary=True, buffered=True)
     set_clause = ", ".join(f"{k} = %s" for k in updates)
     cursor.execute(f"UPDATE users SET {set_clause} WHERE id = %s", (*updates.values(), payload["user_id"]))
     db.commit()
@@ -322,7 +322,7 @@ def update_review(review_id):
     if not updates:
         return jsonify({"error": "Nothing to update"}), 400
     db = get_db()
-    cursor = db.cursor(dictionary=True)
+    cursor = db.cursor(dictionary=True, buffered=True)
     set_clause = ", ".join(f"{k} = %s" for k in updates)
     cursor.execute(f"UPDATE reviews SET {set_clause} WHERE id = %s", (*updates.values(), review_id))
     db.commit()
@@ -363,7 +363,7 @@ def get_reviews():
     user_id = request.args.get("user_id")
  
     db = get_db()
-    cursor = db.cursor(dictionary=True)
+    cursor = db.cursor(dictionary=True, buffered=True)
  
     query = """
         SELECT r.*, u.full_name as reviewer_name, s.name as shop_name
@@ -406,7 +406,7 @@ def submit_review():
         return jsonify({"error": "Rating must be 1-5"}), 400
  
     db = get_db()
-    cursor = db.cursor(dictionary=True)
+    cursor = db.cursor(dictionary=True, buffered=True)
  
     cursor.execute("SELECT id FROM reviews WHERE user_id = %s AND shop_id = %s", (user_id, shop_id))
     if cursor.fetchone():
@@ -489,7 +489,7 @@ def recalculate_user_trust(user_id, cursor, db):
 @app.route("/trust/shop/<shop_id>", methods=["GET"])
 def trust_breakdown_shop(shop_id):
     db = get_db()
-    cursor = db.cursor(dictionary=True)
+    cursor = db.cursor(dictionary=True, buffered=True)
     cursor.execute("""
         SELECT AVG(r.rating) as avg_rating, COUNT(r.id) as review_count,
                TIMESTAMPDIFF(MONTH, s.created_at, NOW()) as age_months,
@@ -546,7 +546,7 @@ def get_complaints():
  
     shop_id = request.args.get("shop_id")
     db = get_db()
-    cursor = db.cursor(dictionary=True)
+    cursor = db.cursor(dictionary=True, buffered=True)
  
     if shop_id:
         cursor.execute(
@@ -566,7 +566,7 @@ def get_complaints():
 @app.route("/leaderboard", methods=["GET"])
 def leaderboard():
     db = get_db()
-    cursor = db.cursor(dictionary=True)
+    cursor = db.cursor(dictionary=True, buffered=True)
     cursor.execute("""
         SELECT u.id, u.full_name, u.trust_score, u.role, rp.points_balance, COUNT(r.id) as review_count
         FROM users u
@@ -591,7 +591,7 @@ def add_comment():
         return jsonify({"error": "Login required"}), 401
     data = request.json
     db = get_db()
-    cursor = db.cursor(dictionary=True)
+    cursor = db.cursor(dictionary=True, buffered=True)
     cursor.execute(
         "INSERT INTO comments (review_id, user_id, commenter_name, commenter_email, comment_text) VALUES (%s, %s, %s, %s, %s)",
         (data.get("review_id"), payload["user_id"], data.get("commenter_name"), data.get("commenter_email"), data.get("comment_text"))
@@ -607,7 +607,7 @@ def get_comments():
     if not review_id:
         return jsonify([])
     db = get_db()
-    cursor = db.cursor(dictionary=True)
+    cursor = db.cursor(dictionary=True, buffered=True)
     cursor.execute(
         "SELECT * FROM comments WHERE review_id = %s ORDER BY created_at ASC",
         (review_id,)
