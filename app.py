@@ -17,6 +17,13 @@ CORS(app, resources={
     }
 })
  
+# Handle preflight OPTIONS requests
+@app.before_request
+def handle_preflight():
+    if request.method == "OPTIONS":
+        response = app.make_default_options_response()
+        return response
+ 
 SECRET_KEY = os.environ.get("SECRET_KEY", "trustpulse-secret-2024")
  
 def get_db():
