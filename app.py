@@ -67,8 +67,14 @@ def signup():
         )
         db.commit()
         user_id = cursor.lastrowid
-        cursor.execute("INSERT INTO reward_points (user_id, points_balance) VALUES (%s, 0)", (user_id,))
-        db.commit()
+        
+        # Try to add reward points, but don't fail if it errors
+        try:
+            cursor.execute("INSERT INTO reward_points (user_id, points_balance) VALUES (%s, 0)", (user_id,))
+            db.commit()
+        except Exception as e:
+            # Log but don't fail signup
+            print(f"Reward points error: {e}")
  
         token = jwt.encode({
             "user_id": user_id,
@@ -77,8 +83,12 @@ def signup():
         }, SECRET_KEY, algorithm="HS256")
  
         return jsonify({"token": token, "user_id": user_id, "email": email, "full_name": full_name})
-    except mysql.connector.errors.IntegrityError:
-        return jsonify({"error": "Email already registered"}), 409
+    except mysql.connector.errors.IntegrityError as e:
+        # Check if it's actually an email duplicate
+        if 'email' in str(e).lower() or 'unique' in str(e).lower():
+            return jsonify({"error": "Email already registered"}), 409
+        else:
+            return jsonify({"error": f"Database error: {str(e)}"}), 500
     finally:
         cursor.close()
         db.close()
