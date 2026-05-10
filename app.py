@@ -44,14 +44,28 @@ def signup():
     cursor = db.cursor(dictionary=True, buffered=True)
  
     try:
+        # Check if email already exists FIRST
+        cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
+        existing = cursor.fetchone()
+        if existing:
+            cursor.close()
+            db.close()
+            return jsonify({"error": "Email already registered"}), 409
+        
+        # Insert new user
         cursor.execute(
             "INSERT INTO users (email, password_hash, full_name, role, profile_completeness, trust_score) VALUES (%s, %s, %s, 'user', 0, 0)",
             (email, hashed, full_name)
         )
         db.commit()
         user_id = cursor.lastrowid
-        cursor.execute("INSERT INTO reward_points (user_id, points_balance) VALUES (%s, 0)", (user_id,))
-        db.commit()
+        
+        # Try reward_points but don't fail signup if it errors
+        try:
+            cursor.execute("INSERT INTO reward_points (user_id, points_balance) VALUES (%s, 0)", (user_id,))
+            db.commit()
+        except Exception as e:
+            print(f"Reward points error (non-fatal): {e}")
  
         token = jwt.encode({
             "user_id": user_id,
@@ -59,12 +73,14 @@ def signup():
             "exp": datetime.datetime.utcnow() + datetime.timedelta(days=30)
         }, SECRET_KEY, algorithm="HS256")
  
-        return jsonify({"token": token, "user_id": user_id, "email": email, "full_name": full_name})
-    except mysql.connector.errors.IntegrityError:
-        return jsonify({"error": "Email already registered"}), 409
-    finally:
         cursor.close()
         db.close()
+        return jsonify({"token": token, "user_id": user_id, "email": email, "full_name": full_name})
+    except Exception as e:
+        cursor.close()
+        db.close()
+        print(f"SIGNUP ERROR: {type(e).__name__}: {str(e)}")
+        return jsonify({"error": f"Signup failed: {str(e)}"}), 500
  
 @app.route("/auth/login", methods=["POST"])
 def login():
