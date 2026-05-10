@@ -135,7 +135,7 @@ def me():
     db = get_db()
     cursor = db.cursor(dictionary=True)
     cursor.execute(
-        "SELECT id, email, full_name, role, trust_score, profile_completeness, account_created_at, owned_shop_id FROM users WHERE id = %s",
+        "SELECT id, email, full_name, role, trust_score, profile_completeness, account_created_at FROM users WHERE id = %s",
         (payload["user_id"],)
     )
     user = cursor.fetchone()
@@ -225,13 +225,6 @@ def create_shop():
         )
         db.commit()
         shop_id = cursor.lastrowid
-        
-        # Automatically update user's owned_shop_id
-        cursor.execute(
-            "UPDATE users SET owned_shop_id = %s WHERE id = %s",
-            (shop_id, user_id)
-        )
-        db.commit()
         
         # Return the created shop
         cursor.execute("SELECT * FROM shops WHERE id = %s", (shop_id,))
